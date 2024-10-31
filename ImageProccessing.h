@@ -1,11 +1,19 @@
 #pragma once
 #include <opencv2/opencv.hpp>
 #include <opencv2/features2d.hpp>
-#include <windows.h>
 #include <filesystem>
 #include <sstream>
-#include <atlbase.h>
 #include <algorithm>
+
+#ifdef _WIN32 || _WIN64
+#include <windows.h>
+#include <wingdi.h>
+#elif __APPLE__
+#include <ApplicationServices/ApplicationServices.h>
+#elif __linux__
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#endif
 
 class IP {
 public:
@@ -279,6 +287,7 @@ public:
         return grayImage;
     }
 
+    #ifdef _WIN32 || _WIN64
     static HBITMAP CaptureScreen() {
         HDC hScreenDC = GetDC(NULL);
         
@@ -323,29 +332,8 @@ public:
         return hBitmap;
     }
 
-    static HBITMAP CropHBitmap(HBITMAP hBitmap, const cv::Rect& cropRect) {
-        BITMAP bitmap;
-        GetObject(hBitmap, sizeof(BITMAP), &bitmap);
-
-        if (cropRect.x < 0 || cropRect.y < 0 ||
-            cropRect.x + cropRect.width > bitmap.bmWidth ||
-            cropRect.y + cropRect.height > bitmap.bmHeight) {
-            
-            return nullptr;
-        }
-
-        HDC hWindowDC = GetDC(nullptr);
-        HDC hMemoryDC = CreateCompatibleDC(hWindowDC);
-        HBITMAP hNewBitmap = CreateCompatibleBitmap(hWindowDC, cropRect.width, cropRect.height);
-        HBITMAP hOldBitmap = (HBITMAP)SelectObject(hMemoryDC, hNewBitmap);
-
-        BitBlt(hMemoryDC, 0, 0, cropRect.width, cropRect.height, hWindowDC, cropRect.x, cropRect.y, SRCCOPY);
-
-        SelectObject(hMemoryDC, hOldBitmap);
-        DeleteDC(hMemoryDC);
-        ReleaseDC(nullptr, hWindowDC);
-
-        return hNewBitmap;
+    static HWND FindWindowByTitle(const std::wstring& title) {
+        return FindWindow(NULL, title.c_str());
     }
 
     static cv::Mat HBitmapToMat(HBITMAP hBitmap) {
@@ -375,10 +363,6 @@ public:
         return mat;
     }
 
-    static HWND FindWindowByTitle(const std::wstring& title) {
-        return FindWindow(NULL, title.c_str());
-    }
-
     static void ClickAtPosition(int x, int y) {
         INPUT inputs[2] = {};
         
@@ -400,6 +384,172 @@ public:
         SendInput(2, inputs, sizeof(INPUT));
     }
 
+    #elif __APPLE__
+    CGImageRef CaptureScreen() {
+        return CGWindowListCreateImage(CGRectInfinite, kCGWindowListOptionOnScreenOnly, kCGWindowImageDefault, kCGWindowImageDefault);
+    }
+
+    CGImageRef CaptureWindow(CGWindowID windowID) {
+        CGImageRef image = CGWindowListCreateImage(
+            CGRectNull,
+            kCGWindowListOptionOnScreenOnly,
+            windowID,
+            kCGWindowImageDefault
+        );
+        
+        if (!image) {
+            throw std::runtime_error("Failed to capture window.");
+        }
+        return image;
+    }
+
+    static WindowID FindWindowByTitle(const std::string& title) {
+        // Get all window IDs
+        uint32_t windowListSize;
+        CGWindowID *windowList = NULL;
+
+        windowList = CGWindowListCopyWindowIDs(kCGWindowListOptionAll, &windowListSize);
+        for (uint32_t i = 0; i < windowListSize; ++i) {
+            // Get the window info
+            NSDictionary *info = (NSDictionary *)CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, windowList[i]);
+            if (info) {
+                // Get window name
+                std::string windowName = (const char *)CFStringGetCStringPtr((CFStringRef)info[kCGWindowName], kCFStringEncodingUTF8);
+                if (windowName == title) {
+                    return windowList[i];  // Return the window ID
+                }
+            }
+        }
+        return 0;  // Not found
+    }
+
+    static cv::Mat CGImageToMat(CGImageRef image) {
+        size_t width = CGImageGetWidth(image);
+        size_t height = CGImageGetHeight(image);
+        
+        cv::Mat mat(height, width, CV_8UC4);
+        
+        CGContextRef context = CGBitmapContextCreate(mat.data, width, height, 8, mat.step[0], 
+                                                    CGColorSpaceCreateDeviceRGB(), 
+                                                    kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+        if (!context) {
+            throw std::runtime_error("Failed to create CGContext.");
+        }
+        
+        CGContextDrawImage(context, CGRectMake(0, 0, width, height), image);
+        CGContextRelease(context);
+        
+        return mat;
+    }
+
+    static void ClickAtPosition(int x, int y) {
+        CGPoint point = CGPointMake(x, y);
+        CGEventRef downEvent = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDown, point, kCGEventSourceStateHIDSystemState);
+        CGEventRef upEvent = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp, point, kCGEventSourceStateHIDSystemState);
+
+        // Move the cursor
+        CGEventPost(kCGHIDEventTap, downEvent);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        CGEventPost(kCGHIDEventTap, upEvent);
+
+        CFRelease(downEvent);
+        CFRelease(upEvent);
+    }
+
+    #elif __linux__
+    XImage* CaptureScreen(Display* display) {
+        Window root = DefaultRootWindow(display);
+        XWindowAttributes attributes;
+        XGetWindowAttributes(display, root, &attributes);
+        return XGetImage(display, root, 0, 0, attributes.width, attributes.height, AllPlanes, ZPixmap);
+    }
+
+    Pixmap CaptureWindow(Display* display, Window window) {
+        XWindowAttributes attrs;
+        XGetWindowAttributes(display, window, &attrs);
+
+        Pixmap pixmap = XCreatePixmap(display, window, attrs.width, attrs.height, attrs.depth);
+        if (!pixmap) {
+            throw std::runtime_error("Failed to create pixmap.");
+        }
+
+        GC gc = XCreateGC(display, pixmap, 0, NULL);
+        XCopyArea(display, window, pixmap, gc, 0, 0, attrs.width, attrs.height, 0, 0);
+        XFreeGC(display, gc);
+
+        return pixmap;
+    }
+
+    static Window FindWindowByTitle(Display* display, const std::string& title) {
+        Window root = DefaultRootWindow(display);
+        Window returnedRoot, returnedParent;
+        Window* children;
+        unsigned int numChildren;
+
+        // Get the list of all windows
+        if (XQueryTree(display, root, &returnedRoot, &returnedParent, &children, &numChildren)) {
+            for (unsigned int i = 0; i < numChildren; ++i) {
+                char* windowTitle;
+                Atom name = XInternAtom(display, "WM_NAME", True);
+                if (XGetWindowProperty(display, children[i], name, 0, 1024, False, AnyPropertyType, 
+                                    &name, &format, &items, &bytes, (unsigned char**)&windowTitle) == Success) {
+                    if (windowTitle && title == windowTitle) {
+                        XFree(windowTitle);
+                        return children[i];  // Return the window
+                    }
+                    XFree(windowTitle);
+                }
+            }
+        }
+        return 0;  // Not found
+    }
+
+    static cv::Mat XImageToMat(XImage* xImage) {
+        int width = xImage->width;
+        int height = xImage->height;
+
+        cv::Mat mat(height, width, CV_8UC4);
+
+        // Copy pixel data from XImage to cv::Mat
+        memcpy(mat.data, xImage->data, height * xImage->bytes_per_line);
+
+        return mat;
+    }
+
+    static void ClickAtPosition(int x, int y) {
+        Display* display = XOpenDisplay(NULL);
+        if (!display) {
+            std::cerr << "Cannot open display!" << std::endl;
+            return;
+        }
+
+        // Move the cursor
+        XWarpPointer(display, None, DefaultRootWindow(display), 0, 0, 0, 0, x, y);
+        XFlush(display);
+
+        // Simulate mouse click
+        XEvent event;
+        event.xbutton.type = ButtonPress;
+        event.xbutton.button = Button1; // Left button
+        event.xbutton.root = DefaultRootWindow(display);
+        event.xbutton.subwindow = DefaultRootWindow(display);
+        event.xbutton.x = x;
+        event.xbutton.y = y;
+        event.xbutton.x_root = x;
+        event.xbutton.y_root = y;
+        event.xbutton.same_screen = True;
+
+        XSendEvent(display, PointerWindow, True, ButtonPressMask, &event);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+        event.xbutton.type = ButtonRelease;
+        XSendEvent(display, PointerWindow, True, ButtonReleaseMask, &event);
+        XFlush(display);
+
+        XCloseDisplay(display);
+    }
+    #endif
+
     static void displayImage(const cv::Mat& image, const std::string& windowName) {
         if (image.empty()) {
             std::cerr << "Could not open or find the image!" << std::endl;
@@ -419,78 +569,6 @@ public:
 
         cv::Mat roiImage = image(roi);
         return roiImage;
-    }
-
-    static cv::Rect GetRoiFromHBitmap(const std::string& keyphrase, HBITMAP hBitmap) {
-        
-        auto parseFraction = [](const std::string& fractionStr) -> double {
-            size_t pos = fractionStr.find('/');
-            if (pos != std::string::npos) {
-                double numerator = std::stod(fractionStr.substr(0, pos));
-                double denominator = std::stod(fractionStr.substr(pos + 1));
-                return numerator / denominator;
-            }
-            return std::stod(fractionStr);
-            };
-
-        
-        BITMAP bitmap;
-        GetObject(hBitmap, sizeof(BITMAP), &bitmap);
-        cv::Size imageSize(bitmap.bmWidth, bitmap.bmHeight);
-
-        if (keyphrase == "default") {
-            return cv::Rect(0, 0, imageSize.width, imageSize.height);
-        }
-
-        std::istringstream ss(keyphrase);
-        std::string direction;
-        std::string fractionStr;
-
-        
-        cv::Rect roi(0, 0, imageSize.width, imageSize.height);
-
-        while (ss >> direction >> fractionStr) {
-            double fraction = parseFraction(fractionStr);
-            int width = imageSize.width;
-            int height = imageSize.height;
-
-            if (direction == "right") {
-                int newWidth = width * fraction;
-                int newX = width - newWidth;
-                roi = cv::Rect(newX, roi.y, newWidth, roi.height);
-            }
-            else if (direction == "left") {
-                int newWidth = width * fraction;
-                roi = cv::Rect(roi.x, roi.y, newWidth, roi.height);
-            }
-            else if (direction == "bottom") {
-                int newHeight = height * fraction;
-                int newY = height - newHeight;
-                roi = cv::Rect(roi.x, newY, roi.width, newHeight);
-            }
-            else if (direction == "top") {
-                int newHeight = height * fraction;
-                roi = cv::Rect(roi.x, roi.y, roi.width, newHeight);
-            }
-            else if (direction == "center") {
-                int newWidth = width * fraction;
-                int newHeight = height * fraction;
-                int newX = (width - newWidth) / 2;
-                int newY = (height - newHeight) / 2;
-                roi = cv::Rect(newX, newY, newWidth, newHeight);
-            }
-            else {
-                std::cerr << "Invalid direction: " << direction << std::endl;
-                return cv::Rect(0, 0, width, height);
-            }
-        }
-
-        
-        roi.x = (roi.x > 0) ? roi.x : 0;
-        roi.y = (roi.y > 0) ? roi.y : 0;
-        roi.width = (roi.width < imageSize.width - roi.x) ? roi.width : imageSize.width - roi.x;
-        roi.height = (roi.height < imageSize.height - roi.y) ? roi.height : imageSize.height - roi.y;
-        return roi;
     }
 
     static cv::Rect getRoiFromKeyphrase(const std::string& keyphrase, const cv::Size& imageSize) {
