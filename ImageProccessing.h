@@ -379,6 +379,25 @@ public:
         SendInput(2, inputs, sizeof(INPUT));
     }
 
+    cv::Mat ResourceToMat(int resourceID, const std::string& resourceType) {
+        HRSRC hResource = FindResource(NULL, MAKEINTRESOURCE(resourceID), resourceType.c_str());
+        if (hResource == NULL) {
+            return cv::Mat();
+        }
+
+        HGLOBAL hLoadedResource = LoadResource(NULL, hResource);
+        if (hLoadedResource == NULL) {
+            return cv::Mat();
+        }
+
+        DWORD dwResourceSize = SizeofResource(NULL, hResource);
+        const void* pResourceData = LockResource(hLoadedResource);
+
+        std::vector<uchar> buffer((uchar*)pResourceData, (uchar*)pResourceData + dwResourceSize);
+        cv::Mat image = cv::imdecode(buffer, cv::IMREAD_COLOR);
+        return image;
+    }
+
     #elif __APPLE__
     CGImageRef CaptureScreen(int x = 0, int y = 0, int width = CGDisplayPixelsWide(kCGDirectMainDisplay), int height = CGDisplayPixelsHigh(kCGDirectMainDisplay)) {
         CGRect captureRect = CGRectMake(x, y, width, height);
@@ -541,6 +560,11 @@ public:
         XCloseDisplay(display);
     }
     #endif
+    
+    cv::Mat ByteArrayToMat(const std::vector<uchar>& byteArray) {
+        cv::Mat image = cv::imdecode(byteArray, cv::IMREAD_COLOR);
+        return image;
+    }
 
     static void displayImage(const cv::Mat& image, const std::string& windowName) {
         if (image.empty()) {
