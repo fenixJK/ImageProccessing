@@ -5,7 +5,7 @@
 #include <sstream>
 #include <algorithm>
 
-#ifdef _WIN32 || _WIN64
+#ifdef _WIN32
 #include <windows.h>
 #include <wingdi.h>
 #elif __APPLE__
@@ -287,20 +287,15 @@ public:
         return grayImage;
     }
 
-    #ifdef _WIN32 || _WIN64
-    static HBITMAP CaptureScreen() {
+    #ifdef _WIN32
+    static HBITMAP CaptureScreen(int x = 0, int y = 0, int width = GetSystemMetrics(SM_CXSCREEN), int height = GetSystemMetrics(SM_CYSCREEN)) {
         HDC hScreenDC = GetDC(NULL);
-        
         HDC hMemoryDC = CreateCompatibleDC(hScreenDC);
 
-        int width = GetSystemMetrics(SM_CXSCREEN);
-        int height = GetSystemMetrics(SM_CYSCREEN);
-
         HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, width, height);
-
         HBITMAP hOldBitmap = (HBITMAP)SelectObject(hMemoryDC, hBitmap);
 
-        BitBlt(hMemoryDC, 0, 0, width, height, hScreenDC, 0, 0, SRCCOPY);
+        BitBlt(hMemoryDC, 0, 0, width, height, hScreenDC, x, y, SRCCOPY);
 
         SelectObject(hMemoryDC, hOldBitmap);
 
@@ -385,8 +380,9 @@ public:
     }
 
     #elif __APPLE__
-    CGImageRef CaptureScreen() {
-        return CGWindowListCreateImage(CGRectInfinite, kCGWindowListOptionOnScreenOnly, kCGWindowImageDefault, kCGWindowImageDefault);
+    CGImageRef CaptureScreen(int x = 0, int y = 0, int width = CGDisplayPixelsWide(kCGDirectMainDisplay), int height = CGDisplayPixelsHigh(kCGDirectMainDisplay)) {
+        CGRect captureRect = CGRectMake(x, y, width, height);
+        return CGWindowListCreateImage(captureRect, kCGWindowListOptionOnScreenOnly, kCGNullWindowID, kCGWindowImageDefault);
     }
 
     CGImageRef CaptureWindow(CGWindowID windowID) {
@@ -404,23 +400,20 @@ public:
     }
 
     static WindowID FindWindowByTitle(const std::string& title) {
-        // Get all window IDs
         uint32_t windowListSize;
         CGWindowID *windowList = NULL;
 
         windowList = CGWindowListCopyWindowIDs(kCGWindowListOptionAll, &windowListSize);
         for (uint32_t i = 0; i < windowListSize; ++i) {
-            // Get the window info
             NSDictionary *info = (NSDictionary *)CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, windowList[i]);
             if (info) {
-                // Get window name
                 std::string windowName = (const char *)CFStringGetCStringPtr((CFStringRef)info[kCGWindowName], kCFStringEncodingUTF8);
                 if (windowName == title) {
-                    return windowList[i];  // Return the window ID
+                    return windowList[i];
                 }
             }
         }
-        return 0;  // Not found
+        return 0;
     }
 
     static cv::Mat CGImageToMat(CGImageRef image) {
@@ -447,7 +440,6 @@ public:
         CGEventRef downEvent = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDown, point, kCGEventSourceStateHIDSystemState);
         CGEventRef upEvent = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp, point, kCGEventSourceStateHIDSystemState);
 
-        // Move the cursor
         CGEventPost(kCGHIDEventTap, downEvent);
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
         CGEventPost(kCGHIDEventTap, upEvent);
@@ -457,11 +449,15 @@ public:
     }
 
     #elif __linux__
-    XImage* CaptureScreen(Display* display) {
+    XImage* CaptureScreen(Display* display, int x = 0, int y = 0, int width = 0, int height = 0) {
         Window root = DefaultRootWindow(display);
         XWindowAttributes attributes;
         XGetWindowAttributes(display, root, &attributes);
-        return XGetImage(display, root, 0, 0, attributes.width, attributes.height, AllPlanes, ZPixmap);
+
+        if (width == 0) width = attributes.width;
+        if (height == 0) height = attributes.height;
+
+        return XGetImage(display, root, x, y, width, height, AllPlanes, ZPixmap);
     }
 
     Pixmap CaptureWindow(Display* display, Window window) {
@@ -486,7 +482,6 @@ public:
         Window* children;
         unsigned int numChildren;
 
-        // Get the list of all windows
         if (XQueryTree(display, root, &returnedRoot, &returnedParent, &children, &numChildren)) {
             for (unsigned int i = 0; i < numChildren; ++i) {
                 char* windowTitle;
@@ -495,13 +490,13 @@ public:
                                     &name, &format, &items, &bytes, (unsigned char**)&windowTitle) == Success) {
                     if (windowTitle && title == windowTitle) {
                         XFree(windowTitle);
-                        return children[i];  // Return the window
+                        return children[i];
                     }
                     XFree(windowTitle);
                 }
             }
         }
-        return 0;  // Not found
+        return 0;
     }
 
     static cv::Mat XImageToMat(XImage* xImage) {
@@ -510,7 +505,6 @@ public:
 
         cv::Mat mat(height, width, CV_8UC4);
 
-        // Copy pixel data from XImage to cv::Mat
         memcpy(mat.data, xImage->data, height * xImage->bytes_per_line);
 
         return mat;
@@ -523,14 +517,12 @@ public:
             return;
         }
 
-        // Move the cursor
         XWarpPointer(display, None, DefaultRootWindow(display), 0, 0, 0, 0, x, y);
         XFlush(display);
 
-        // Simulate mouse click
         XEvent event;
         event.xbutton.type = ButtonPress;
-        event.xbutton.button = Button1; // Left button
+        event.xbutton.button = Button1;
         event.xbutton.root = DefaultRootWindow(display);
         event.xbutton.subwindow = DefaultRootWindow(display);
         event.xbutton.x = x;
