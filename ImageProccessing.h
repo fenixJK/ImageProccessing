@@ -11,6 +11,7 @@
 #elif __APPLE__
 #include <ApplicationServices/ApplicationServices.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <CoreGraphics/CoreGraphics.h>
 #elif __linux__
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -421,18 +422,22 @@ public:
 
     static CGWindowID FindWindowByTitle(const std::string& title) {
         uint32_t windowListSize;
-        CGWindowID *windowList = NULL;
-
-        windowList = CGWindowListCopyWindowIDs(kCGWindowListOptionAll, &windowListSize);
-        for (uint32_t i = 0; i < windowListSize; ++i) {
-            NSDictionary *info = (NSDictionary *)CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, windowList[i]);
-            if (info) {
-                std::string windowName = (const char *)CFStringGetCStringPtr((CFStringRef)info[kCGWindowName], kCFStringEncodingUTF8);
-                if (windowName == title) {
-                    return windowList[i];
+        CFArrayRef windowList = CGWindowListCopyWindowInfo(kCGWindowListOptionAll, kCGNullWindowID);
+        CFIndex count = CFArrayGetCount(windowList);
+        for (CFIndex i = 0; i < count; ++i) {
+            CFDictionaryRef windowInfo = (CFDictionaryRef)CFArrayGetValueAtIndex(windowList, i);
+            CFStringRef windowTitleRef = (CFStringRef)CFDictionaryGetValue(windowInfo, kCGWindowName);
+            if (windowTitleRef) {
+                char windowTitle[256];
+                if (CFStringGetCString(windowTitleRef, windowTitle, sizeof(windowTitle), kCFStringEncodingUTF8)) {
+                    if (title == windowTitle) {
+                        CFRelease(windowList);
+                        return (CGWindowID)CFDictionaryGetValue(windowInfo, CFSTR("kCGWindowID"));
+                    }
                 }
             }
         }
+        CFRelease(windowList);
         return 0;
     }
 
