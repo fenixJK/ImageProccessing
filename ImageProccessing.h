@@ -10,6 +10,7 @@
 #include <wingdi.h>
 #elif __APPLE__
 #include <ApplicationServices/ApplicationServices.h>
+#include <CoreFoundation/CoreFoundation.h>
 #elif __linux__
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -418,7 +419,7 @@ public:
         return image;
     }
 
-    static WindowID FindWindowByTitle(const std::string& title) {
+    static CGWindowID FindWindowByTitle(const std::string& title) {
         uint32_t windowListSize;
         CGWindowID *windowList = NULL;
 
@@ -456,8 +457,8 @@ public:
 
     static void ClickAtPosition(int x, int y) {
         CGPoint point = CGPointMake(x, y);
-        CGEventRef downEvent = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDown, point, kCGEventSourceStateHIDSystemState);
-        CGEventRef upEvent = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp, point, kCGEventSourceStateHIDSystemState);
+        CGEventRef downEvent = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDown, point, CGMouseButton::kCGMouseButtonLeft);
+        CGEventRef upEvent = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp, point, CGMouseButton::kCGMouseButtonLeft);
 
         CGEventPost(kCGHIDEventTap, downEvent);
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
