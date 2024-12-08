@@ -289,6 +289,23 @@ public:
         return grayImage;
     }
 
+    bool findPixelColor(const cv::Mat& image, const cv::Vec3b& targetColor, int tolerance = 0) {
+        if (image.empty()) {
+            throw std::invalid_argument("The image is empty.");
+        }
+        for (int y = 0; y < image.rows; ++y) {
+            for (int x = 0; x < image.cols; ++x) {
+                const cv::Vec3b& pixel = image.at<cv::Vec3b>(y, x);
+                if (std::abs(pixel[0] - targetColor[0]) <= tolerance &&
+                    std::abs(pixel[1] - targetColor[1]) <= tolerance &&
+                    std::abs(pixel[2] - targetColor[2]) <= tolerance) {
+                    return true; 
+                }
+            }
+        }
+        return false;
+    }
+
     #ifdef _WIN32
     static HBITMAP CaptureScreen(int x = 0, int y = 0, int width = GetSystemMetrics(SM_CXSCREEN), int height = GetSystemMetrics(SM_CYSCREEN)) {
         HDC hScreenDC = GetDC(NULL);
