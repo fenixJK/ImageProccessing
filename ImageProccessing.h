@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <sstream>
 #include <algorithm>
+#include <iostream>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -418,7 +419,7 @@ public:
     }
 
     #elif __APPLE__
-    CGImageRef CaptureScreen(int x = 0, int y = 0, int width = CGDisplayPixelsWide(kCGDirectMainDisplay), int height = CGDisplayPixelsHigh(kCGDirectMainDisplay)) {
+    /*CGImageRef CaptureScreen(int x = 0, int y = 0, int width = CGDisplayPixelsWide(kCGDirectMainDisplay), int height = CGDisplayPixelsHigh(kCGDirectMainDisplay)) {
         CGRect captureRect = CGRectMake(x, y, width, height);
         return CGWindowListCreateImage(captureRect, kCGWindowListOptionOnScreenOnly, kCGNullWindowID, kCGWindowImageDefault);
     }
@@ -456,7 +457,7 @@ public:
         }
         CFRelease(windowList);
         return 0;
-    }
+    }*/
 
     static cv::Mat CGImageToMat(CGImageRef image) {
         size_t width = CGImageGetWidth(image);
